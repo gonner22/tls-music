@@ -1,0 +1,273 @@
+<canvas #canvas></canvas>
+<div id="stats-container" [hidden]="!showFps"></div>
+<div class="block-info" *ngIf="selectedBlock">
+  <div class="block-info-header">
+    <button class="btn btn-clear float-end" (click)="deselectBlock(selectedBlock)">
+      <fa-icon icon="times"></fa-icon>
+    </button>
+    <a class="btn btn-primary mb-2" [href]="getBlockLink(selectedBlock.userData['hash'])" target="_blank">Explorer</a>
+    <button class="btn btn-primary ms-2 mb-2" (click)="focusBlockWithHash(selectedBlock.userData['hash'])">Focus</button>
+  </div>
+  <div class="block-info-body">
+    <div class="mb-2"><b>Hash</b><br />{{ selectedBlock.userData["hash"] }}</div>
+    <div class="mb-2"><b>Block Height</b><br />{{ selectedBlock.userData["height"] }}</div>
+    <div class="mb-2"><b>Size (bytes)</b><br />{{ selectedBlock.userData["size"] }}</div>
+    <div class="mb-2"><b>Color</b><br />{{ selectedBlock.userData["colorDescription"] }}</div>
+    <div class="mb-2"><b>Merkle Root</b><br />{{ selectedBlock.userData["merkleroot"] }}</div>
+    <div class="mb-2"><b>Timestamp</b><br />
+      {{ selectedBlock.userData["timestamp"] | date:'yyyy-MM-dd HH:mm:ss' }}
+      <span class="text-muted">({{ selectedBlock.userData["timestamp"] | timeAgo }})</span>
+    </div>
+    <div class="mb-2"><b>Confirmations</b><br />{{ selectedBlock.userData["confirmations"] }}</div>
+    <div class="mb-2"><b>Nonce</b><br />{{ selectedBlock.userData["nonce"] }}</div>
+    <div class="mb-2"><b>Bits</b><br />{{ selectedBlock.userData["bits"] }}</div>
+    <div class="mb-2"><b>Version</b><br />{{ selectedBlock.userData["version"] }}</div>
+    <div class="mb-2"><b>Difficulty</b><br />{{ selectedBlock.userData["difficulty"] }}</div>
+    <div class="mb-2"><b>Transactions</b><br />{{ selectedBlock.userData["transactionCount"] }}</div>
+  </div>
+</div>
+
+<div class="top-right-buttons">
+  <div *ngIf="stateService.showUi">
+    <div ngbAccordion [closeOthers]="true" class="w-100">
+      <div ngbAccordionItem>
+        <h2 ngbAccordionHeader>
+          <button ngbAccordionButton>Network</button>
+        </h2>
+        <div ngbAccordionCollapse>
+          <div ngbAccordionBody>
+            <ng-template>
+              <select class="form-select form-select-sm mb-2" [ngModel]="selectedNetwork" (ngModelChange)="selectedNetwork = $event">
+                <option [ngValue]="'mainnet'">mainnet</option>
+              </select>
+            </ng-template>
+          </div>
+        </div>
+      </div>
+      <div ngbAccordionItem>
+        <h2 ngbAccordionHeader>
+          <button ngbAccordionButton>Sound</button>
+        </h2>
+        <div ngbAccordionCollapse>
+          <div ngbAccordionBody>
+            <ng-template>
+              <select class="form-select form-select-sm mb-2" [ngModel]="soundTrackIndex" (ngModelChange)="changeSoundTrack($event)">
+                <option *ngFor="let track of soundTracks; let i = index" [ngValue]="i">{{ track.name }}</option>
+              </select>
+              <select class="form-select form-select-sm mb-2" [ngModel]="soundDirection" (ngModelChange)="changeSoundDirection($event)">
+                <option [ngValue]="1">Ascending Scale</option>
+                <option [ngValue]="-1">Descending Scale</option>
+              </select>
+              <select class="form-select form-select-sm mb-2" [ngModel]="selectedInstrument" (ngModelChange)="changeInstrument($event)">
+                <option *ngFor="let instrument of instruments" [ngValue]="instrument">{{ instrument }}</option>
+              </select>
+            </ng-template>
+          </div>
+        </div>
+      </div>
+      <div ngbAccordionItem>
+        <h2 ngbAccordionHeader>
+          <button ngbAccordionButton>Visuals</button>
+        </h2>
+        <div ngbAccordionCollapse>
+          <select class="form-select form-select-sm mt-2" [ngModel]="selectedPreset" (ngModelChange)="changePreset($event)">
+            <option *ngFor="let preset of presets" [ngValue]="preset.name">{{ preset.name }}</option>
+          </select>
+          <div ngbAccordionBody>
+            <ng-template>
+              <div>
+                <label for="bloomStrength">Bloom Strength</label>
+                <input
+                  class="form-range"
+                  type="range"
+                  id="bloomStrength"
+                  min="0"
+                  max="10"
+                  step="0.1"
+                  [(ngModel)]="bloomStrength"
+                  (ngModelChange)="changeBloomStrength($event)"
+                />
+              </div>
+              <div>
+                <label for="bloomRadius">Bloom Radius</label>
+                <input
+                  class="form-range"
+                  type="range"
+                  id="bloomRadius"
+                  min="0"
+                  max="10"
+                  step="0.1"
+                  [(ngModel)]="bloomRadius"
+                  (ngModelChange)="changeBloomRadius($event)"
+                />
+              </div>
+              <div>
+                <label for="bloomThreshold">Bloom Threshold</label>
+                <input
+                  class="form-range"
+                  type="range"
+                  id="bloomThreshold"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  [(ngModel)]="bloomThreshold"
+                  (ngModelChange)="changeBloomThreshold($event)"
+                />
+              </div>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="showBlocks" [(ngModel)]="showBlocks" (ngModelChange)="changeShowBlocks($event)" />
+                <label class="form-check-label" for="showBlocks">Show Blocks</label>
+              </div>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="showFog" [(ngModel)]="showFog" (ngModelChange)="changeShowFog($event)" />
+                <label class="form-check-label" for="showText">Show Fog</label>
+              </div>
+              <div class="mt-2">
+                <input type="color" id="telestaiBlockColor" [(ngModel)]="telestaiBlockColor" (ngModelChange)="changeTelestaiBlockColor($event)" />
+                <label for="telestaiBlockColor">Telestai Block</label>
+              </div>
+              <div class="mt-2">
+                <input type="color" id="selectedColor" [(ngModel)]="selectedColor" (ngModelChange)="changeSelectedColor($event)" />
+                <label for="selectedColor">Selected Block</label>
+              </div>
+            </ng-template>
+          </div>
+        </div>
+      </div>
+      <div ngbAccordionItem>
+        <h2 ngbAccordionHeader>
+          <button ngbAccordionButton>Debugging</button>
+        </h2>
+        <div ngbAccordionCollapse>
+          <div ngbAccordionBody>
+            <ng-template>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="showFps" [(ngModel)]="showFps" (ngModelChange)="changeShowFps($event)" />
+                <label class="form-check-label" for="showFps">Show FPS</label>
+              </div>
+              <div class="mt-2">Memory: 4h fixed</div>
+              <div class="mt-2">Blocks: {{ blockCount }}</div>
+              <div class="mt-2">Lines: {{ lineCount }}</div>
+              <div class="mt-2">Start: {{ loadTimestamp | date: 'MM/dd HH:mm:ss' }}</div>
+              <button class="btn btn-primary mt-2 w-100" (click)="resetAllSettings()">
+                <fa-icon icon="x" class="me-2"></fa-icon>
+                Reset All
+              </button>
+              <button class="btn btn-primary mt-2 w-100" (click)="saveToFile()" [disabled]="showLines">
+                <fa-icon icon="download" class="me-2"></fa-icon>
+                Save Data
+              </button>
+              <div class="w-100 mt-2">
+                <input type="file" class="hidden-file-input" accept=".json" id="importFile" (change)="loadFromFile($event)" />
+                <label class="w-100 btn btn-primary" for="importFile" [ngClass]="{ disabled: showLines }">
+                  <fa-icon icon="upload" class="me-2"></fa-icon>
+                  Load Data
+                </label>
+              </div>
+              <div *ngIf="showLines">
+                <div class="text-danger mt-2">Save/load disabled while lines are visible</div>
+              </div>
+            </ng-template>
+          </div>
+        </div>
+      </div>
+      <!-- <div ngbAccordionItem>
+        <h2 ngbAccordionHeader>
+          <button ngbAccordionButton>Logs</button>
+        </h2>
+        <div ngbAccordionCollapse>
+          <div ngbAccordionBody class="bg-black">
+            <ng-template>
+              <select class="form-select form-select-sm mb-2" [ngModel]="logLevel" (ngModelChange)="changeLogLevel($event)">
+                <option [ngValue]="0">Info</option>
+                <option [ngValue]="1">Warning</option>
+                <option [ngValue]="2">Danger</option>
+              </select>
+              <div class="log-container">
+                <div
+                  class="log"
+                  *ngFor="let log of logs"
+                  [ngClass]="{ 'text-white': log.level === 0, 'text-warning': log.level === 1, 'text-danger': log.level === 2 }"
+                  (click)="focusBlockWithHash(log.hash)"
+                >
+                  {{ log.timestamp | date: "HH:mm:ss" }} - {{ log.message }}
+                </div>
+              </div>
+            </ng-template>
+          </div>
+        </div>
+      </div> -->
+    </div>
+  </div>
+  <button class="btn btn-primary core-button" (click)="toggleShowUi()">
+    <fa-icon [icon]="stateService.showUi ? 'eye-slash' : 'eye'"></fa-icon>
+  </button>
+</div>
+
+<div class="bottom-right-buttons d-flex flex-row align-items-start" *ngIf="stateService.showUi">
+  <div class="d-flex flex-column align-items-center">
+    <span style="font-size: 0.9rem; margin-bottom: 4px;">Center</span>
+    <button class="btn btn-primary core-button mb-2" style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;" (click)="recenterCamera()">
+      <fa-icon icon="bullseye"></fa-icon>
+    </button>
+  </div>
+  <div class="zoom-controls d-flex flex-column align-items-center" style="margin-left: 8px;">
+    <span style="font-size: 0.9rem; margin-bottom: 4px;">Zoom</span>
+    <button
+      class="btn btn-primary core-button mb-1"
+      (mousedown)="setZoomDirection(-cameraSpeed)"
+      (mouseup)="setZoomDirection(0)"
+      (mouseleave)="setZoomDirection(0)"
+      (touchend)="setZoomDirection(0)"
+      (touchcancel)="setZoomDirection(0)"
+      (touchstart)="setZoomDirection(-cameraSpeed)"
+    >
+      <span style="font-size: 1.5rem; font-weight: bold;">+</span>
+    </button>
+    <button
+      class="btn btn-primary core-button"
+      (mousedown)="setZoomDirection(cameraSpeed)"
+      (mouseup)="setZoomDirection(0)"
+      (mouseleave)="setZoomDirection(0)"
+      (touchend)="setZoomDirection(0)"
+      (touchcancel)="setZoomDirection(0)"
+      (touchstart)="setZoomDirection(cameraSpeed)"
+    >
+      <span style="font-size: 1.5rem; font-weight: bold;">-</span>
+    </button>
+  </div>
+</div>
+
+<div class="hover-hash">
+  <span *ngIf="hoveredBlock">
+    <div>
+      Block: {{ hoveredBlock.userData['height'] }}
+      <span *ngIf="hoveredBlock.userData['timestamp']">
+        ({{ hoveredBlock.userData['timestamp'] | timeAgo }})
+      </span>
+    </div>
+    <div>Hash: {{ hoveredBlock.userData['hash'] }}</div>
+  </span>
+</div>
+<div *ngIf="!audioUnlocked" class="audio-unlock-overlay" (click)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()">
+  <div class="audio-unlock-message">
+    <h2>Welcome to tls-music</h2>
+    <p class="mt-2">
+      Visualize the <b>last 200 blocks</b> of Telestai in real time.<br>
+      Click on any block to see its details.
+    </p>
+    <p class="mt-2">
+      You can customize the experience from the <b>right menu</b>:
+    </p>
+    <ul style="text-align:left; margin: 0 auto; max-width: 350px;">
+      <li><b>Sounds</b>: choose scale, instrument and musical direction.</li>
+      <li><b>Visuals</b>: adjust colors and visual effects.</li>
+      <li><b>Debugging</b>: show FPS and other technical options.</li>
+    </ul>
+    <div class="d-flex flex-column flex-md-row justify-content-center align-items-center mt-4 gap-3">
+      <button class="btn btn-primary btn-lg" (click)="setAudioUnlocked(true, true)">Enter with sound</button>
+      <button class="btn btn-secondary btn-lg btn-no-sound" (click)="setAudioUnlocked(true, false)">Enter without sound</button>
+    </div>
+    <p class="mt-3 text-muted" style="font-size:1rem;">You can enable or change the sound at any time from the Sounds menu.</p>
+  </div>
+</div>
