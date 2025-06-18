@@ -11,7 +11,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { PRESETS } from '../../constants/presets';
-import { compareNotes, playSound, preloadSounds, SOUND_TRACKS } from '../../constants/sound-util';
+import { compareNotes, playSound, preloadSounds, preloadSoundsWithProgress, SOUND_TRACKS } from '../../constants/sound-util';
 import { Log } from '../../models/log';
 import { Preset } from '../../models/preset';
 import { SerializedVisualizer } from '../../models/serialized-visualizer';
@@ -104,6 +104,10 @@ export class VisualizerComponent implements AfterViewInit, OnDestroy {
   public hoveredBlock: THREE.Mesh | undefined;
   public audioUnlocked: boolean = false;
   private telestaiPollingStarted: boolean = false;
+  
+  // Sound loading state
+  public soundsLoaded: boolean = false;
+  public loadedSoundsCount: number = 0;
 
   // private
   private bloomPass!: UnrealBloomPass;
@@ -273,15 +277,29 @@ export class VisualizerComponent implements AfterViewInit, OnDestroy {
 
     localStorage.setItem('soundTrackIndex', index.toString());
     console.log('preloadSounds', this.selectedTrack);
+    
+    // Reset loading state
+    this.soundsLoaded = false;
+    this.loadedSoundsCount = 0;
+    
     if (this.soundEnabled) {
       this.preloadingSounds = true;
       const sounds = this.selectedTrack.map(sound => sound.replace('assets/sounds/', `assets/sounds/${this.selectedInstrument}/`));
-      preloadSounds(sounds).then(() => {
-        this.preloadingSounds = false;
-        console.log('preloadSounds done');
+      
+      // Import the new function with progress tracking
+      import('../../constants/sound-util').then(mod => {
+        mod.preloadSoundsWithProgress(sounds, (loaded: number, total: number) => {
+          this.loadedSoundsCount = loaded;
+          if (loaded === total) {
+            this.soundsLoaded = true;
+            this.preloadingSounds = false;
+            console.log('preloadSounds done');
+          }
+        });
       });
     } else {
       this.preloadingSounds = false;
+      this.soundsLoaded = true; // Consider sounds "loaded" if sound is disabled
     }
   }
 
@@ -1223,41 +1241,160 @@ export class VisualizerComponent implements AfterViewInit, OnDestroy {
   }
 
   private startTelestaiPolling() {
-    this.pollTelestaiBlock();
-    setInterval(() => this.pollTelestaiBlock(), 10000); // every 10 seconds
+    this.loadInitialBlocks();
+    setInterval(() => this.checkForNewBlocks(), 10000); // every 10 seconds
   }
 
-  private async pollTelestaiBlock() {
+  private async loadInitialBlocks() {
     try {
-      const bestHash = await this.telestaiService.getBestBlockHash();
-      if (bestHash !== this.lastBlockHash) {
-        this.lastBlockHash = bestHash;
-        const blocksToAdd: TelestaiBlock[] = [];
-        let currentHash: string | undefined = bestHash;
-        let count = 0;
-        // Go back up to 200 blocks or until they are already in the visualization
-        while (typeof currentHash === 'string' && count < 200 && !this.blockHashLookup[currentHash]) {
-          const block = await this.telestaiService.getBlock(currentHash);
-          blocksToAdd.push(block);
-          currentHash = block.previousblockhash;
-          count++;
-        }
-        // Add the blocks in order from oldest to newest, with delay so they play sound
-        const playBlocksSequentially = async () => {
-          for (let i = blocksToAdd.length - 1; i >= 0; i--) {
-            const block = blocksToAdd[i];
-            this.addTelestaiBlock(block);
-            await new Promise(res => setTimeout(res, 80)); // 80ms delay between blocks
-          }
-        };
-        await playBlocksSequentially();
+      // Fetch the 200 most recent blocks from the cache service
+      const blocks: TelestaiBlock[] = await this.telestaiService.getRecentBlocks();
+      
+      // Clear current blocks
+      this.blockHashes = [];
+      this.blockHashLookup = {};
+      
+      // Add blocks one by one with delay to maintain visual/sound effects
+      for (let i = 0; i < blocks.length; i++) {
+        await new Promise(resolve => setTimeout(resolve, 50)); // 50ms delay between blocks
+        this.addTelestaiBlock(blocks[i], true); // true = with sound/visual effects
+        
+        // Position blocks in spiral as they are added (step by step formation)
+        this.updateSpiralPositions();
+      }
+      
+      // Store the latest block hash for future comparisons
+      if (blocks.length > 0) {
+        this.lastBlockHash = blocks[blocks.length - 1].hash;
       }
     } catch (error) {
-      console.error('Error polling Telestai block:', error);
+      console.error('Error loading initial Telestai blocks:', error);
     }
   }
 
-  private addTelestaiBlock(blockData: TelestaiBlock) {
+  private updateSpiralPositions() {
+    if (this.blockHashes.length === 1) {
+      // First block at center
+      const block = this.blockHashLookup[this.blockHashes[0]];
+      block.position.set(0, 0, 0);
+      
+      // Play sound for the first block positioning
+      this.playBlockSound(block);
+      
+      // Set initial camera position
+      this.camera.position.x = 0;
+      this.camera.position.y = 0;
+      this.camera.position.z = 300;
+      if (this.controls) {
+        this.controls.target.set(0, 0, 0);
+        this.controls.update();
+      }
+    } else if (this.blockHashes.length > 1) {
+      // Calculate spiral positions for all blocks
+      const minHeight = Math.min(...this.blockHashes.map(h => this.blockHashLookup[h].userData['height']));
+      
+      // Get the last added block to play its sound
+      const lastAddedHash = this.blockHashes[this.blockHashes.length - 1];
+      const lastAddedBlock = this.blockHashLookup[lastAddedHash];
+      
+      this.blockHashes.forEach(hash => {
+        const b = this.blockHashLookup[hash];
+        const offset = b.userData['height'] - minHeight;
+        const angle = offset * 0.25; // Radians, adjust for density
+        const radius = 20 + offset * 3; // Adjust for separation
+        const x = radius * Math.cos(angle);
+        const y = radius * Math.sin(angle);
+        const z = offset * 2; // Or use 0 if you want it flat
+        b.position.set(x, y, z);
+      });
+      
+      // Play sound for the last added block when it gets positioned
+      if (lastAddedBlock) {
+        this.playBlockSound(lastAddedBlock);
+      }
+      
+      // Update camera to follow the spiral growth
+      this.camera.position.x = 0;
+      this.camera.position.y = 0;
+      this.camera.position.z = this.spiralRadius * 3;
+      if (this.controls) {
+        this.controls.target.set(0, 0, (this.blockHashes.length * 2) / 2);
+        this.controls.update();
+      }
+    }
+  }
+
+  private playBlockSound(block: THREE.Mesh) {
+    if (this.selectedTrack && !this.preloadingSounds && this.soundEnabled) {
+      // The note index depends on the number of transactions
+      const txCount = block.userData['transactionCount'] || 1;
+      const blockSoundIndex = txCount % this.selectedTrack.length;
+      let soundName = this.selectedTrack[blockSoundIndex];
+      soundName = soundName.replace('assets/sounds/', `assets/sounds/${this.selectedInstrument}/`);
+      playSound(soundName, INSTRUMENT_VOLUMES[this.selectedInstrument]);
+      this.soundIndex = (this.soundIndex + 1) % this.selectedTrack.length;
+    }
+  }
+
+  private async checkForNewBlocks() {
+    try {
+      // Fetch the latest blocks
+      const blocks: TelestaiBlock[] = await this.telestaiService.getRecentBlocks();
+      
+      if (blocks.length === 0) return;
+      
+      const latestBlock = blocks[blocks.length - 1];
+      
+      // Check if there's a new block
+      if (this.lastBlockHash && latestBlock.hash === this.lastBlockHash) {
+        // No new blocks, do nothing
+        return;
+      }
+      
+      // Find new blocks (blocks that we don't have yet)
+      const newBlocks = blocks.filter(block => !this.blockHashes.includes(block.hash));
+      
+      if (newBlocks.length > 0) {
+        // Add only the new blocks
+        for (const newBlock of newBlocks) {
+          this.addTelestaiBlock(newBlock, true); // true = with sound/visual effects
+          
+          // Remove old blocks if we exceed 200 (keep only the most recent 200)
+          while (this.blockHashes.length > 200) {
+            const oldestHash = this.blockHashes.shift();
+            if (oldestHash) {
+              const oldBlock = this.blockHashLookup[oldestHash];
+              if (oldBlock) {
+                this.disposeMesh(oldBlock);
+                delete this.blockHashLookup[oldestHash];
+              }
+            }
+          }
+          
+          // Update spiral positions after adding each new block
+          this.updateSpiralPositions();
+        }
+        
+        // Update the latest block hash
+        this.lastBlockHash = latestBlock.hash;
+      }
+    } catch (error) {
+      console.error('Error checking for new Telestai blocks:', error);
+    }
+  }
+
+  private repositionBlocksInSpiral() {
+    // This method is now handled by updateSpiralPositions()
+    // Keeping for backward compatibility
+    this.updateSpiralPositions();
+  }
+
+  private addTelestaiBlock(blockData: TelestaiBlock, withEffects: boolean = true) {
+    // Check if block already exists
+    if (this.blockHashes.includes(blockData.hash)) {
+      return;
+    }
+
     const geometry = new THREE.BoxGeometry(this.blockSize, this.blockSize, 1);
     const color = parseInt(this.telestaiBlockColor.replace('#', ''), 16);
     const material = new THREE.MeshBasicMaterial({ color });
@@ -1283,63 +1420,30 @@ export class VisualizerComponent implements AfterViewInit, OnDestroy {
     this.scene.add(block);
     this.blockHashes.push(blockData.hash);
     this.blockHashLookup[blockData.hash] = block;
+    
     if (this.initialDaaScore === undefined) {
       this.initialDaaScore = blockData.height;
     }
     if (this.latestDaaScore === undefined || blockData.height > this.latestDaaScore) {
       this.latestDaaScore = blockData.height;
     }
-    // Play sound when adding block
-    if (this.selectedTrack && !this.preloadingSounds && this.soundEnabled) {
-      // The note index depends on the number of transactions
-      const txCount = blockData.tx.length;
-      const blockSoundIndex = txCount % this.selectedTrack.length;
-      let soundName = this.selectedTrack[blockSoundIndex];
-      soundName = soundName.replace('assets/sounds/', `assets/sounds/${this.selectedInstrument}/`);
-      playSound(soundName, INSTRUMENT_VOLUMES[this.selectedInstrument]);
-      this.soundIndex = (this.soundIndex + 1) % this.selectedTrack.length;
-    }
-    // --- Archimedean spiral for all blocks ---
-    if (this.blockHashes.length > 1) {
-      const minHeight = Math.min(...this.blockHashes.map(h => this.blockHashLookup[h].userData['height']));
-      this.blockHashes.forEach(hash => {
-        const b = this.blockHashLookup[hash];
-        const offset = b.userData['height'] - minHeight;
-        const angle = offset * 0.25; // Radians, adjust for density
-        const radius = 20 + offset * 3; // Adjust for separation
-        const x = radius * Math.cos(angle);
-        const y = radius * Math.sin(angle);
-        const z = offset * 2; // Or use 0 if you want it flat
-        b.position.set(x, y, z);
-      });
-      // Center the camera in the center of the spiral and move it far enough away
-      this.camera.position.x = 0;
-      this.camera.position.y = 0;
-      this.camera.position.z = this.spiralRadius * 3;
-      if (this.controls) {
-        this.controls.target.set(0, 0, (this.blockHashes.length * 2) / 2);
-        this.controls.update();
-      }
-    } else {
-      block.position.set(0, 0, 0);
-      this.camera.position.x = 0;
-      this.camera.position.y = 0;
-      this.camera.position.z = 300;
-      if (this.controls) {
-        this.controls.target.set(0, 0, 0);
-        this.controls.update();
-      }
-    }
+    
+    // Don't play sound here anymore - it will be played when positioned in spiral
+    // The sound will be played by updateSpiralPositions()
+    
+    // Block position will be set by updateSpiralPositions()
+    // Set a temporary position at origin
+    block.position.set(0, 0, 0);
   }
 
   setAudioUnlocked(val: boolean, withSound: boolean = true) {
     this.audioUnlocked = val;
     this.soundEnabled = withSound;
     if (val && withSound && !this.telestaiPollingStarted) {
-      // Only initialize context and preload if user wants sound
+      // Only initialize context if user wants sound
+      // Sounds are already preloaded in ngOnInit, no need to reload them
       import('../../constants/sound-util').then(mod => {
         mod.getAudioContext();
-        this.changeSoundTrack(this.soundTrackIndex ?? 0); // This will do the preload
         this.telestaiPollingStarted = true;
         this.startTelestaiPolling();
       });

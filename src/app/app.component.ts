@@ -38,4 +38,9 @@ export class AppComponent {
       this.copiedText = false;
     }, 2000);
   }
+
+  loadTelestai() {
+    // Reload the page to reinitialize the application
+    window.location.reload();
+  }
 }

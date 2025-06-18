@@ -15,10 +15,20 @@ export function getAudioContext(): AudioContext | null {
 const loadSound = async (url: string): Promise<AudioBuffer> => {
   const ctx = getAudioContext();
   if (!ctx) throw new Error('AudioContext not initialized');
-  const response = await fetch(url);
+  
+  // Use fetch with cache-friendly headers
+  const response = await fetch(url, {
+    cache: 'force-cache', // Use browser cache if available
+    headers: {
+      'Cache-Control': 'max-age=31536000' // Cache for 1 year
+    }
+  });
+  
   const arrayBuffer = await response.arrayBuffer();
   return ctx.decodeAudioData(arrayBuffer);
 };
+
+
 
 // Preload all sounds
 export const preloadSounds = async (sounds: string[]) => {
@@ -34,6 +44,51 @@ export const preloadSounds = async (sounds: string[]) => {
       audioPool[sound][0].buffer = buffer;
     } catch (e) {
       console.error(`Error loading sound: ${sound}`);
+    }
+  }
+};
+
+// Preload all sounds with progress callback
+export const preloadSoundsWithProgress = async (sounds: string[], onProgress?: (loaded: number, total: number) => void) => {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  
+  let loadedCount = 0;
+  
+  // Load all sounds and track timing to detect cache hits
+  for (let i = 0; i < sounds.length; i++) {
+    const sound = sounds[i];
+    
+    if (!audioPool[sound]) {
+      audioPool[sound] = [];
+    }
+    
+    try {
+      const startTime = performance.now();
+      const buffer = await loadSound(sound);
+      const endTime = performance.now();
+      
+      audioPool[sound].push(ctx.createBufferSource());
+      audioPool[sound][0].buffer = buffer;
+      
+      loadedCount++;
+      
+      // Log if it was fast (likely cached) or slow (downloaded)
+      if (endTime - startTime < 100) {
+        console.log(`Sound ${sound} loaded from cache (${Math.round(endTime - startTime)}ms)`);
+      } else {
+        console.log(`Sound ${sound} downloaded (${Math.round(endTime - startTime)}ms)`);
+      }
+      
+      if (onProgress) {
+        onProgress(loadedCount, sounds.length);
+      }
+    } catch (e) {
+      console.error(`Error loading sound: ${sound}`, e);
+      loadedCount++;
+      if (onProgress) {
+        onProgress(loadedCount, sounds.length);
+      }
     }
   }
 };
@@ -310,7 +365,7 @@ export const INSTRUMENT_VOLUMES: { [instrument: string]: number } = {
 };
 
 export function closeAudioContext() {
-  if (audioContext && audioContext.state !== 'closed') {
+  if (audioContext) {
     audioContext.close();
     audioContext = null;
   }

@@ -3,49 +3,12 @@ import { TelestaiBlock } from '../models/telestai-block';
 
 @Injectable({ providedIn: 'root' })
 export class TelestaiService {
-  private rpcUrl = '/telestai/';
-  private rpcUser = 'superstrongusername';
-  private rpcPassword = 'superstrongpassword';
-
-  private getAuthHeader(): string {
-    return 'Basic ' + btoa(`${this.rpcUser}:${this.rpcPassword}`);
-  }
-
-  async getBestBlockHash(): Promise<string> {
-    const body = {
-      jsonrpc: '1.0',
-      id: 'tls-music',
-      method: 'getbestblockhash',
-      params: []
-    };
-    const response = await fetch(this.rpcUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': this.getAuthHeader(),
-      },
-      body: JSON.stringify(body)
-    });
-    const data = await response.json();
-    return data.result;
-  }
-
-  async getBlock(hash: string): Promise<TelestaiBlock> {
-    const body = {
-      jsonrpc: '1.0',
-      id: 'tls-music',
-      method: 'getblock',
-      params: [hash, true]
-    };
-    const response = await fetch(this.rpcUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': this.getAuthHeader(),
-      },
-      body: JSON.stringify(body)
-    });
-    const data = await response.json();
-    return data.result;
+  /**
+   * Fetch the 200 most recent blocks from the cache service (oldest to newest).
+   */
+  async getRecentBlocks(): Promise<TelestaiBlock[]> {
+    const response = await fetch('https://tls-music.telestai.io/blocks');
+    if (!response.ok) throw new Error('Failed to fetch blocks from cache service');
+    return await response.json();
   }
 } 
